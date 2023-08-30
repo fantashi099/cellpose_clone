@@ -248,6 +248,37 @@ def normalize_img(img, axis=-1, invert=False):
     return img
 
 
+def move_axis(img, m_axis=-1, first=True):
+    """ move axis m_axis to first or last position """
+    if m_axis==-1:
+        m_axis = img.ndim-1
+    m_axis = min(img.ndim-1, m_axis)
+    axes = np.arange(0, img.ndim)
+    if first:
+        axes[1:m_axis+1] = axes[:m_axis]
+        axes[0] = m_axis
+    else:
+        axes[m_axis:-1] = axes[m_axis+1:]
+        axes[-1] = m_axis
+    img = img.transpose(tuple(axes))
+    return img
+
+
+# This was edited to fix a bug where single-channel images of shape (y,x) would be 
+# transposed to (x,y) if x<y, making the labels no longer correspond to the data. 
+def move_min_dim(img, force=False):
+    """ move minimum dimension last as channels if < 10, or force==True """
+    if len(img.shape) > 2: #only makese sense to do this if channel axis is already present 
+        min_dim = min(img.shape)
+        if min_dim < 10 or force:
+            if img.shape[-1]==min_dim:
+                channel_axis = -1
+            else:
+                channel_axis = (img.shape).index(min_dim)
+            img = move_axis(img, m_axis=channel_axis, first=False)
+    return img
+
+
 def reshape_and_normalize_data(
     train_data, test_data=None, channels=None, normalize=True
 ):
@@ -301,3 +332,134 @@ def reshape_and_normalize_data(
 
     # run_test = True
     return train_data, test_data
+
+
+def update_axis(m_axis, to_squeeze, ndim):
+    if m_axis==-1:
+        m_axis = ndim-1
+    if (to_squeeze==m_axis).sum() == 1:
+        m_axis = None
+    else:
+        inds = np.ones(ndim, bool)
+        inds[to_squeeze] = False
+        m_axis = np.nonzero(np.arange(0, ndim)[inds]==m_axis)[0]
+        if len(m_axis) > 0:
+            m_axis = m_axis[0]
+        else:
+            m_axis = None
+    return m_axis
+
+
+def convert_image(data: np.array, channels, normalize=True):
+    if data.ndim > 3:
+        data = data.squeeze()
+
+    if channels is not None:
+        data = reshape(data, channels)
+    else:
+        raise ValueError("Channels error")
+    
+    if normalize:
+        data = normalize_img(data)
+    
+    return data
+
+
+def resize_image(img0, Ly=None, Lx=None, rsz=None, interpolation=cv2.INTER_LINEAR, no_channels=False):
+    """ resize image for computing flows / unresize for computing dynamics
+
+    Parameters
+    -------------
+
+    img0: ND-array
+        image of size [Y x X x nchan] or [Lz x Y x X x nchan] or [Lz x Y x X]
+
+    Ly: int, optional
+
+    Lx: int, optional
+
+    rsz: float, optional
+        resize coefficient(s) for image; if Ly is None then rsz is used
+
+    interpolation: cv2 interp method (optional, default cv2.INTER_LINEAR)
+
+    Returns
+    --------------
+
+    imgs: ND-array 
+        image of size [Ly x Lx x nchan] or [Lz x Ly x Lx x nchan]
+
+    """
+    if Ly is None and rsz is None:
+        error_message = 'must give size to resize to or factor to use for resizing'
+        raise ValueError(error_message)
+
+    if Ly is None:
+        # determine Ly and Lx using rsz
+        if not isinstance(rsz, list) and not isinstance(rsz, np.ndarray):
+            rsz = [rsz, rsz]
+        if no_channels:
+            Ly = int(img0.shape[-2] * rsz[-2])
+            Lx = int(img0.shape[-1] * rsz[-1])
+        else:
+            Ly = int(img0.shape[-3] * rsz[-2])
+            Lx = int(img0.shape[-2] * rsz[-1])
+    
+    # no_channels useful for z-stacks, sot he third dimension is not treated as a channel
+    # but if this is called for grayscale images, they first become [Ly,Lx,2] so ndim=3 but 
+    if (img0.ndim>2 and no_channels) or (img0.ndim==4 and not no_channels):
+        if Ly==0 or Lx==0:
+            raise ValueError('anisotropy too high / low -- not enough pixels to resize to ratio')
+        if no_channels:
+            imgs = np.zeros((img0.shape[0], Ly, Lx), np.float32)
+        else:
+            imgs = np.zeros((img0.shape[0], Ly, Lx, img0.shape[-1]), np.float32)
+        for i,img in enumerate(img0):
+            imgs[i] = cv2.resize(img, (Lx, Ly), interpolation=interpolation)
+    else:
+        imgs = cv2.resize(img0, (Lx, Ly), interpolation=interpolation)
+    return imgs
+
+
+def pad_image_ND(img0, div=16, extra = 1):
+    """ pad image for test-time so that its dimensions are a multiple of 16 (2D or 3D)
+
+    Parameters
+    -------------
+
+    img0: ND-array
+        image of size [nchan (x Lz) x Ly x Lx]
+
+    div: int (optional, default 16)
+
+    Returns
+    --------------
+
+    I: ND-array
+        padded image
+
+    ysub: array, int
+        yrange of pixels in I corresponding to img0
+
+    xsub: array, int
+        xrange of pixels in I corresponding to img0
+
+    """
+    Lpad = int(div * np.ceil(img0.shape[-2]/div) - img0.shape[-2])
+    xpad1 = extra*div//2 + Lpad//2
+    xpad2 = extra*div//2 + Lpad - Lpad//2
+    Lpad = int(div * np.ceil(img0.shape[-1]/div) - img0.shape[-1])
+    ypad1 = extra*div//2 + Lpad//2
+    ypad2 = extra*div//2+Lpad - Lpad//2
+
+    if img0.ndim>3:
+        pads = np.array([[0,0], [0,0], [xpad1,xpad2], [ypad1, ypad2]])
+    else:
+        pads = np.array([[0,0], [xpad1,xpad2], [ypad1, ypad2]])
+
+    I = np.pad(img0,pads, mode='constant')
+
+    Ly, Lx = img0.shape[-2:]
+    ysub = np.arange(xpad1, xpad1+Ly)
+    xsub = np.arange(ypad1, ypad1+Lx)
+    return I, ysub, xsub
