@@ -115,9 +115,9 @@ def train_net(
         if epoch % eval_step == 0:
             if X_test is not None and y_test is not None:
                 loss_avg_test, nsum = 0, 0
-                n_imgs = len(X_test)
-                indices = np.random.permutation(n_imgs)
-                for batch in range(0, n_imgs, eval_batch_size):
+                eval_imgs = len(X_test)
+                indices = np.random.permutation(eval_imgs)
+                for batch in range(0, eval_imgs, eval_batch_size):
                     inds = indices[batch : batch + eval_batch_size]
                     rsc = (
                         diam_test[inds] / diam_mean
@@ -142,10 +142,10 @@ def train_net(
                         nsum += len(img)
 
                 loss_avg_test /= nsum
-                print("Eval Loss %2.4f, LR %2.5f" % (loss_avg_test, learning_rate))
+                print("Eval Loss %2.4f" % (loss_avg_test))
 
         if save_path is not None:
-            if epoch == save_every:
+            if epoch % save_every == 0 and epoch > 0:
                 if model_name is None:
                     model_name = "default"
                 file_name = "model_{}_epoch_{}".format(model_name, epoch)
