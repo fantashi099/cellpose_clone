@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 import torch
@@ -6,12 +7,12 @@ import torch.nn as nn
 from model import CellPose
 from torch.optim import Adam
 from tqdm import tqdm
-from transform import (convert_image, diameters, normalize_img, pad_image_ND,
-                       random_rotate_and_resize, reshape_and_normalize_data,
-                       resize_image, make_tiles, average_tiles)
+from transform import (average_tiles, convert_image, diameters, make_tiles,
+                       normalize_img, pad_image_ND, random_rotate_and_resize,
+                       reshape_and_normalize_data, resize_image)
 from vector_gradient import (compute_masks, dx_to_circ, labels_to_flows,
                              to_Tensor)
-import time
+
 
 class CellPoseModel:
     def __init__(
@@ -39,6 +40,21 @@ class CellPoseModel:
     def set_device(self, device: str = "cpu"):
         self.cellpose.to(device)
 
+    def _get_batch_imgs(
+        self, data, label, batch, batch_size, indices, diam, rescale, scale_range
+    ):
+        inds = indices[batch : batch + batch_size]
+        rsc = diam[inds] / self.diam_mean if rescale else np.ones(len(inds), np.float32)
+
+        img, label, scale = random_rotate_and_resize(
+            [data[idx] for idx in inds],
+            Y=[label[idx][1:] for idx in inds],
+            rescale=rsc,
+            scale_range=scale_range,
+        )
+        img = to_Tensor(img, self.device).float()
+        return img, label
+
     def loss_fn(self, lbl, y):
         """loss function between true labels lbl and prediction y"""
         veci = 5.0 * to_Tensor(lbl[:, 1:], self.device).float()
@@ -48,7 +64,7 @@ class CellPoseModel:
         loss2 = self.criterion2(y[:, 2], lbl)
         loss = loss + loss2
         return loss
-    
+
     def net_infer(self, img):
         # Model Inference
         img = np.expand_dims(img, axis=0)
@@ -81,7 +97,6 @@ class CellPoseModel:
         eval_batch_size: int = 1,
         rescale: bool = True,
         model_name: str = None,
-        device: str = "cuda",
     ) -> None:
         X_train, X_test = reshape_and_normalize_data(
             X_train, test_data=X_test, channels=channels
@@ -110,7 +125,9 @@ class CellPoseModel:
         self.criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
 
         # compute average cell diameter
-        diam_train = np.array([diameters(train_flows[idx][0])[0] for idx in range(len(train_flows))])
+        diam_train = np.array(
+            [diameters(train_flows[idx][0])[0] for idx in range(len(train_flows))]
+        )
         diam_train_mean = diam_train[diam_train > 0].mean()
         self.diam_labels = diam_train_mean
 
@@ -125,7 +142,9 @@ class CellPoseModel:
         else:
             scale_range = 1.0
 
-        self.cellpose.diam_labels.data = torch.ones(1, device=device) * diam_train_mean
+        self.cellpose.diam_labels.data = (
+            torch.ones(1, device=self.device) * diam_train_mean
+        )
 
         n_imgs = len(X_train)
         loss_avg, nsum = 0, 0
@@ -143,29 +162,26 @@ class CellPoseModel:
         for epoch in range(n_epochs):
             indices = np.random.permutation(n_imgs)
             for batch in tqdm(range(0, n_imgs, batch_size)):
-                inds = indices[batch : batch + batch_size]
-                rsc = (
-                    diam_train[inds] / self.diam_mean
-                    if rescale
-                    else np.ones(len(inds), np.float32)
+                img, label = self._get_batch_imgs(
+                    X_train,
+                    train_flows,
+                    batch,
+                    batch_size,
+                    indices,
+                    diam_train,
+                    rescale,
+                    scale_range,
                 )
 
-                img, label, scale = random_rotate_and_resize(
-                    [X_train[idx] for idx in inds],
-                    Y=[train_flows[idx][1:] for idx in inds],
-                    rescale=rsc,
-                    scale_range=scale_range,
-                )
-                img = to_Tensor(img, device).float()
                 self.optimizer.zero_grad()
                 self.cellpose.train()
-                out = self.cellpose(img)[0]
 
+                out = self.cellpose(img)[0]
                 loss = self.loss_fn(label, out)
                 loss.backward()
+                self.optimizer.step()
 
                 train_loss = loss.item()
-                self.optimizer.step()
                 train_loss *= len(img)
 
                 loss_avg += train_loss
@@ -179,19 +195,17 @@ class CellPoseModel:
                     eval_imgs = len(X_test)
                     indices = np.random.permutation(eval_imgs)
                     for batch in range(0, eval_imgs, eval_batch_size):
-                        inds = indices[batch : batch + eval_batch_size]
-                        rsc = (
-                            diam_test[inds] / diam_mean
-                            if rescale
-                            else np.ones(len(inds), np.float32)
+                        img, label = self._get_batch_imgs(
+                            X_test,
+                            test_flows,
+                            batch,
+                            eval_batch_size,
+                            indices,
+                            diam_test,
+                            rescale,
+                            scale_range,
                         )
-                        img, label, scale = random_rotate_and_resize(
-                            [X_test[idx] for idx in inds],
-                            Y=[test_flows[idx][1:] for idx in inds],
-                            rescale=rsc,
-                            scale_range=scale_range,
-                        )
-                        img = to_Tensor(img, device).float()
+
                         self.cellpose.eval()
                         with torch.no_grad():
                             out = self.cellpose(img)[0]
@@ -263,18 +277,23 @@ class CellPoseModel:
 
             # =========================================
 
-            IMG, ysub, xsub, Ly, Lx = make_tiles(img, bsize=224, 
-                                                            augment=False, tile_overlap=0.1)
+            IMG, ysub, xsub, Ly, Lx = make_tiles(
+                img, bsize=224, augment=False, tile_overlap=0.1
+            )
             ny, nx, nchan, ly, lx = IMG.shape
-            IMG = np.reshape(IMG, (ny*nx, nchan, ly, lx))
+            IMG = np.reshape(IMG, (ny * nx, nchan, ly, lx))
             batch_size = 1
             niter = int(np.ceil(IMG.shape[0] / batch_size))
-            nout = 3 + 32*False
+            nout = 3 + 32 * False
             y = np.zeros((IMG.shape[0], nout, ly, lx))
             for k in range(niter):
-                irange = slice(batch_size*k, min(IMG.shape[0], batch_size*k+batch_size))
+                irange = slice(
+                    batch_size * k, min(IMG.shape[0], batch_size * k + batch_size)
+                )
                 yf, tiled_style = self.net_infer(IMG[irange][0])
-                y[irange] = yf.reshape(irange.stop-irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1])
+                y[irange] = yf.reshape(
+                    irange.stop - irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1]
+                )
                 if k == 0:
                     style = tiled_style[0]
                 style += tiled_style.sum(axis=0)
@@ -283,9 +302,9 @@ class CellPoseModel:
                 y = np.reshape(y, (ny, nx, nout, bsize, bsize))
                 y = transforms.unaugment_tiles(y, self.unet)
                 y = np.reshape(y, (-1, nout, bsize, bsize))
-            
+
             yf = average_tiles(y, ysub, xsub, Ly, Lx)
-            yf = yf[:,:img.shape[1],:img.shape[2]]
+            yf = yf[:, : img.shape[1], : img.shape[2]]
 
             # =====================================================================
             style /= (style**2).sum() ** 0.5
@@ -362,5 +381,7 @@ class CellPoseModel:
         )
         flows = [dx_to_circ(dP), dP, cellprob, p]
         end_time = time.time()
-        print(f"Total Process Inference Time: {end_time - start_time}, FPS: {1/(end_time - start_time)}")
+        print(
+            f"Total Process Inference Time: {end_time - start_time}, FPS: {1/(end_time - start_time)}"
+        )
         return masks, flows, styles
