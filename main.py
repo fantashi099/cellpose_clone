@@ -137,7 +137,7 @@ def train_net(
                         loss = loss_fn(label, out, criterion, criterion2, device)
                         test_loss = loss.item()
                         test_loss *= len(img)
-                        
+
                         loss_avg_test += test_loss
                         nsum += len(img)
 
@@ -185,8 +185,9 @@ if __name__ == "__main__":
             test_X.append(img)
             test_y.append(mask)
 
-
-    train_X, test_X = reshape_and_normalize_data(train_X, test_data=test_X, channels=[0, 0])
+    train_X, test_X = reshape_and_normalize_data(
+        train_X, test_data=test_X, channels=[0, 0]
+    )
     print("Create Vector Gradient from Label Masks")
     train_flows = labels_to_flows(train_y, use_gpu=True, device="cuda")
     test_flows = labels_to_flows(test_y, use_gpu=True, device="cuda")
@@ -198,8 +199,15 @@ if __name__ == "__main__":
         train_X = [train_X[i] for i in ikeep]
         train_flows = [train_flows[i] for i in ikeep]
 
-    
-
     model = CellPose(c_hiddens=[2, 32, 64, 128, 256]).to("cuda")
     print("Start Training")
-    train_net(train_X, train_flows, test_X, test_flows, model, n_epochs=2, save_path="./", device="cuda")
+    train_net(
+        train_X,
+        train_flows,
+        test_X,
+        test_flows,
+        model,
+        n_epochs=2,
+        save_path="./",
+        device="cuda",
+    )

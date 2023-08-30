@@ -24,6 +24,25 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 
+class HeadBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=1) -> None:
+        super(HeadBlock, self).__init__()
+
+        self.net = nn.Sequential(
+            nn.BatchNorm2d(in_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                padding=kernel_size // 2,
+            ),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class SkipConv(nn.Module):
     def __init__(self, in_channels, out_channels) -> None:
         super(SkipConv, self).__init__()
@@ -176,7 +195,7 @@ class CellPose(nn.Module):
         self.down_model = DownSample(c_hiddens=c_down)
         self.up_model = UpSample(c_hiddens=c_up)
         self.style = MakeStyle()
-        self.head = ConvBlock(c_up[-1], nclasses, 1)
+        self.head = HeadBlock(c_up[-1], nclasses, 1)
         self.diam_mean = nn.Parameter(
             data=torch.ones(1) * diam_mean, requires_grad=False
         )
