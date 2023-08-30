@@ -84,7 +84,7 @@ class CellPoseModel:
         nremove = (nmasks < min_train_masks).sum()
         if nremove > 0:
             ikeep = np.nonzero(nmasks >= min_train_masks)[0]
-            train_X = [train_X[i] for i in ikeep]
+            X_train = [X_train[i] for i in ikeep]
             train_flows = [train_flows[i] for i in ikeep]
 
         self.optimizer = Adam(
