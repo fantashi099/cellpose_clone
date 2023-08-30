@@ -67,14 +67,12 @@ class CellPoseModel:
 
     def _net_infer(self, img):
         # Model Inference
-        img = np.expand_dims(img, axis=0)
         img = to_Tensor(img, self.device)
         self.cellpose.eval()
         with torch.no_grad():
             yf, style = self.cellpose(img)
             yf = yf.detach().cpu().numpy()
             style = style.detach().cpu().numpy()
-        yf, style = yf[0], style[0]
         return yf, style
 
     def train(
@@ -87,7 +85,6 @@ class CellPoseModel:
         use_gpu: bool = True,
         save_path: str = None,
         min_train_masks: int = 5,
-        diam_mean: int = 30,
         save_every: int = 50,
         eval_step: int = 50,
         learning_rate: float = 3e-4,
@@ -100,9 +97,14 @@ class CellPoseModel:
     ) -> None:
         if len(X_train) != len(y_train):
             raise ValueError("train data and labels are not same length!")
+
+        if X_test and y_test:
+            if (len(X_test) != len(y_test)):
+                raise ValueError("test data and labels are not same length!")
         
-        if X_test is not None and (len(X_test) != len(y_test)):
-            raise ValueError("test data and labels are not same length!")
+        if channels is None:
+            print("Channels is None => Set channels = [0,0]")
+            channels = [0,0]
 
         X_train, X_test = reshape_and_normalize_data(
             X_train, test_data=X_test, channels=channels
@@ -139,7 +141,7 @@ class CellPoseModel:
 
         if rescale:
             diam_train[diam_train < 5] = 5.0
-            if X_test is not None:
+            if X_test is not None and y_test is not None:
                 diam_test = np.array(
                     [diameters(test_flows[idx][0])[0] for idx in range(len(test_flows))]
                 )
@@ -244,6 +246,9 @@ class CellPoseModel:
         resample: bool = True,
         interp: bool = True,
         use_gpu: bool = True,
+        invert: bool = False,
+        tile: bool = True,
+        batch_infer: int = 1,
     ):
         shape = data.shape
         nimg = shape[0]
@@ -263,11 +268,12 @@ class CellPoseModel:
 
         for idx in range(nimg):
             img = data[idx]
-            if normalize:
-                img = normalize_img(img)
+            if normalize or invert:
+                img = normalize_img(img, invert=invert)
             if rescale != 1.0:
                 img = resize_image(img, rsz=rescale)
 
+            # Model Inference
             # make image nchan x Ly x Lx for net
             img = np.transpose(img, (2, 0, 1))
             detranspose = (1, 2, 0)
@@ -283,34 +289,39 @@ class CellPoseModel:
 
             # =========================================
 
-            IMG, ysub, xsub, Ly, Lx = make_tiles(
-                img, bsize=224, augment=False, tile_overlap=0.1
-            )
-            ny, nx, nchan, ly, lx = IMG.shape
-            IMG = np.reshape(IMG, (ny * nx, nchan, ly, lx))
-            batch_size = 1
-            niter = int(np.ceil(IMG.shape[0] / batch_size))
-            nout = 3 + 32 * False
-            y = np.zeros((IMG.shape[0], nout, ly, lx))
-            for k in range(niter):
-                irange = slice(
-                    batch_size * k, min(IMG.shape[0], batch_size * k + batch_size)
+            if tile:
+                IMG, ysub, xsub, Ly, Lx = make_tiles(
+                    img, bsize=224, augment=False, tile_overlap=0.1
                 )
-                yf, tiled_style = self._net_infer(IMG[irange][0])
-                y[irange] = yf.reshape(
-                    irange.stop - irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1]
-                )
-                if k == 0:
-                    style = tiled_style[0]
-                style += tiled_style.sum(axis=0)
-            style /= IMG.shape[0]
-            if False:
-                y = np.reshape(y, (ny, nx, nout, bsize, bsize))
-                y = transforms.unaugment_tiles(y, self.unet)
-                y = np.reshape(y, (-1, nout, bsize, bsize))
+                ny, nx, nchan, ly, lx = IMG.shape
+                IMG = np.reshape(IMG, (ny * nx, nchan, ly, lx))
+                niter = int(np.ceil(IMG.shape[0] / batch_infer))
+                nout = 3 + 32 * False
+                y = np.zeros((IMG.shape[0], nout, ly, lx))
+                for k in range(niter):
+                    irange = slice(
+                        batch_infer * k, min(IMG.shape[0], batch_infer * k + batch_infer)
+                    )
+                    yf, tiled_style = self._net_infer(IMG[irange])
+                    y[irange] = yf.reshape(
+                        irange.stop - irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1]
+                    )
+                    if k == 0:
+                        style = tiled_style[0]
+                    style += tiled_style.sum(axis=0)
+                style /= IMG.shape[0]
+                if False:
+                    y = np.reshape(y, (ny, nx, nout, bsize, bsize))
+                    y = unaugment_tiles(y, self.unet)
+                    y = np.reshape(y, (-1, nout, bsize, bsize))
 
-            yf = average_tiles(y, ysub, xsub, Ly, Lx)
-            yf = yf[:, : img.shape[1], : img.shape[2]]
+                yf = average_tiles(y, ysub, xsub, Ly, Lx)
+                yf = yf[:, : img.shape[1], : img.shape[2]]
+            else:
+                # Inference the whole image
+                img = np.expand_dims(img, axis=0)
+                yf, style = self._net_infer(img)
+                yf, style = yf[0], style[0]
 
             # =====================================================================
             style /= (style**2).sum() ** 0.5
@@ -326,6 +337,7 @@ class CellPoseModel:
             styles[idx] = style
         styles = styles.squeeze()
 
+        # Compute Mask from Prediction
         niter = 200 / rescale
         masks, p = [], []
         resize = [shape[1], shape[2]] if not resample else None
@@ -365,14 +377,24 @@ class CellPoseModel:
         resample=True,
         interp=True,
         use_gpu=False,
+        invert: bool = False,
+        tile: bool = True,
+        batch_infer: int = 1,
     ):
-        # reshape image (normalization happens in _run_cp)
+        if channels is None:
+            print("Channels is None => Set channels = [0,0]")
+            channels = [0,0]
+
+        # reshape image (normalization happens in postprocess)
         data = convert_image(data, channels=channels, normalize=False)
 
         if data.ndim < 4:
             data = data[np.newaxis, ...]
 
-        rescale = self.diam_mean / diameter
+        if diameter is not None and diameter > 0:
+            rescale = self.diam_mean / diameter
+        else:
+            rescale = self.diam_mean / self.diam_labels
 
         start_time = time.time()
         masks, styles, dP, cellprob, p = self.postprocess(
@@ -382,8 +404,10 @@ class CellPoseModel:
             flow_threshold=flow_threshold,
             cellprob_threshold=cellprob_threshold,
             resample=resample,
+            invert=invert,
             interp=interp,
             use_gpu=use_gpu,
+            tile=tile,
         )
         flows = [dx_to_circ(dP), dP, cellprob, p]
         end_time = time.time()
