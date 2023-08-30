@@ -11,7 +11,7 @@ from transform import (convert_image, diameters, normalize_img, pad_image_ND,
                        resize_image)
 from vector_gradient import (compute_masks, dx_to_circ, labels_to_flows,
                              to_Tensor)
-
+import time
 
 class CellPoseModel:
     def __init__(
@@ -254,10 +254,13 @@ class CellPoseModel:
             img = to_Tensor(img, self.device)
             self.cellpose.eval()
             with torch.no_grad():
+                model_time = time.time()
                 yf, style = self.cellpose(img)
                 yf = yf.detach().cpu().numpy()
                 style = style.detach().cpu().numpy()
             yf, style = yf[0], style[0]
+            model_end_time = time.time()
+            print(f"Model Inference Time: {model_end_time - model_time}, FPS: {1/(model_end_time - model_time)}")
 
             style /= (style**2).sum() ** 0.5
 
@@ -267,8 +270,8 @@ class CellPoseModel:
             if resample:
                 yf = resize_image(yf, shape[1], shape[2])
 
-            cellprob[idx] = yf[:, :, 0]
-            dP[:, idx] = yf[:, :, 1:].transpose((2, 0, 1))
+            cellprob[idx] = yf[:, :, 2]
+            dP[:, idx] = yf[:, :, :2].transpose((2, 0, 1))
             styles[idx] = style
         styles = styles.squeeze()
 
@@ -320,6 +323,7 @@ class CellPoseModel:
 
         rescale = self.diam_mean / diameter
 
+        start_time = time.time()
         masks, styles, dP, cellprob, p = self.postprocess(
             data,
             normalize=True,
@@ -331,4 +335,6 @@ class CellPoseModel:
             use_gpu=use_gpu,
         )
         flows = [dx_to_circ(dP), dP, cellprob, p]
+        end_time = time.time()
+        print(f"Total Process Inference Time: {end_time - start_time}, FPS: {1/(end_time - start_time)}")
         return masks, flows, styles

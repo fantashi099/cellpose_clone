@@ -815,10 +815,10 @@ def compute_masks(dP, cellprob, p=None, niter=200,
         #calculate masks
         mask = get_masks(p, iscell=cp_mask)
         # flow thresholding factored out of get_masks
-        # if not do_3D:
-        #     if mask.max()>0 and flow_threshold is not None and flow_threshold > 0:
-        #         # make sure labels are unique at output of get_masks
-        #         mask = remove_bad_flow_masks(mask, dP, threshold=flow_threshold, use_gpu=use_gpu, device=device)
+        if not do_3D:
+            if mask.max()>0 and flow_threshold is not None and flow_threshold > 0:
+                # make sure labels are unique at output of get_masks
+                mask = remove_bad_flow_masks(mask, dP, threshold=flow_threshold, use_gpu=use_gpu, device=device)
         
             
         if resize is not None:
