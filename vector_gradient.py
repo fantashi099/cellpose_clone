@@ -184,7 +184,7 @@ def masks_to_flows_cpu(masks, device=None):
     
     nmask = masks.max()
     slices = find_objects(masks)
-    dia = diameters(masks)
+    dia = diameters(masks)[0]
     s2 = (.15 * dia)**2
     for i,si in enumerate(slices):
         if si is not None:
