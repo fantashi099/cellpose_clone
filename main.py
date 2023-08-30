@@ -67,12 +67,11 @@ def train_net(
 
     model.diam_labels.data = torch.ones(1, device=device) * diam_train_mean
 
-    n_channels = X_train[0].shape[0]
     n_imgs = len(X_train)
     loss_avg, nsum = 0, 0
 
     if save_every > n_epochs:
-        save_every = n_epochs
+        save_every = n_epochs - 1
 
     if save_path is not None:
         fdir = os.path.join(save_path, "models/")
@@ -111,9 +110,9 @@ def train_net(
             loss_avg += train_loss
             nsum += len(img)
 
+        loss_avg /= nsum
         print("Epoch %d, Loss %2.4f, LR %2.5f" % (epoch, loss_avg, learning_rate))
         if epoch % eval_step == 0:
-            loss_avg /= nsum
             if X_test is not None and y_test is not None:
                 loss_avg_test, nsum = 0, 0
                 n_imgs = len(X_test)
@@ -141,6 +140,8 @@ def train_net(
                         
                         loss_avg_test += test_loss
                         nsum += len(img)
+
+                loss_avg_test /= nsum
                 print("Eval Loss %2.4f, LR %2.5f" % (loss_avg_test, learning_rate))
 
         if save_path is not None:
