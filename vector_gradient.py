@@ -65,7 +65,7 @@ def _extend_centers_gpu(neighbors, centers, isneighbor, Ly, Lx, n_iter=200, devi
     # meds = torch.from_numpy(centers.astype(int)).to(device).long()
     # isneigh = torch.from_numpy(isneighbor).to(device)
     meds = to_Tensor(centers.astype(int), device).long()
-    isneigh = to_Tensor(to_Tensor, device)
+    isneigh = to_Tensor(isneighbor, device)
     for i in range(n_iter):
         T[:, meds[:,0], meds[:,1]] +=1
         Tneigh = T[:, pt[:,:,0], pt[:,:,1]]
