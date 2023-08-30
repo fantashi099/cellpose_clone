@@ -98,6 +98,12 @@ class CellPoseModel:
         rescale: bool = True,
         model_name: str = None,
     ) -> None:
+        if len(X_train) != len(y_train):
+            raise ValueError("train data and labels are not same length!")
+        
+        if X_test is not None and (len(X_test) != len(y_test)):
+            raise ValueError("test data and labels are not same length!")
+
         X_train, X_test = reshape_and_normalize_data(
             X_train, test_data=X_test, channels=channels
         )
