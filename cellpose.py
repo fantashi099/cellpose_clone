@@ -98,14 +98,14 @@ class CellPoseModel:
         self.criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
 
         # compute average cell diameter
-        diam_train = np.array([diameters(y_train[idx]) for idx in range(len(y_train))])
+        diam_train = np.array([diameters(train_flows[idx]) for idx in range(len(train_flows))])
         diam_train_mean = diam_train[diam_train > 0].mean()
 
         if rescale:
             diam_train[diam_train < 5] = 5.0
             if X_test is not None:
                 diam_test = np.array(
-                    [diameters(y_test[idx]) for idx in range(len(y_test))]
+                    [diameters(test_flows[idx]) for idx in range(len(test_flows))]
                 )
                 diam_test[diam_test < 5] = 5.0
             scale_range = 0.5
@@ -126,6 +126,7 @@ class CellPoseModel:
             if not os.path.exists(fdir):
                 os.makedirs(fdir)
 
+        print("Start Training Model")
         for epoch in range(n_epochs):
             self.cellpose.train()
             indices = np.random.permutation(n_imgs)
@@ -139,7 +140,7 @@ class CellPoseModel:
 
                 img, label, scale = random_rotate_and_resize(
                     [X_train[idx] for idx in inds],
-                    Y=[y_train[idx][1:] for idx in inds],
+                    Y=[train_flows[idx][1:] for idx in inds],
                     rescale=rsc,
                     scale_range=scale_range,
                 )
@@ -173,7 +174,7 @@ class CellPoseModel:
                         )
                         img, label, scale = random_rotate_and_resize(
                             [X_test[idx] for idx in inds],
-                            Y=[y_test[idx][1:] for idx in inds],
+                            Y=[test_flows[idx][1:] for idx in inds],
                             rescale=rsc,
                             scale_range=scale_range,
                         )
