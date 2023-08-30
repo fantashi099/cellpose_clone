@@ -132,17 +132,13 @@ def random_rotate_and_resize(
 
 
 def diameters(masks):
-    median = []
-    for idx in range(masks.shape[0]):
-        _, counts = np.unique(np.int32(masks[idx]), return_counts=True)
-        counts = counts[1:]  # remove background - 0
-        if len(counts) > 0:
-            md = np.median(counts)
-        else:
-            md = 0
-        md /= (np.pi**0.5) / 2
-        median.append(md)
-    return np.median(median)
+    _, counts = np.unique(np.int32(masks), return_counts=True)
+    counts = counts[1:]
+    md = np.median(counts**0.5)
+    if np.isnan(md):
+        md = 0
+    md /= (np.pi**0.5)/2
+    return md, counts**0.5
 
 
 def reshape(data, channels=[0, 0], chan_first=False):

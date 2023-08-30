@@ -98,14 +98,15 @@ class CellPoseModel:
         self.criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
 
         # compute average cell diameter
-        diam_train = np.array([diameters(train_flows[idx]) for idx in range(len(train_flows))])
+        diam_train = np.array([diameters(train_flows[idx][0])[0] for idx in range(len(train_flows))])
         diam_train_mean = diam_train[diam_train > 0].mean()
+        self.diam_labels = diam_train_mean
 
         if rescale:
             diam_train[diam_train < 5] = 5.0
             if X_test is not None:
                 diam_test = np.array(
-                    [diameters(test_flows[idx]) for idx in range(len(test_flows))]
+                    [diameters(test_flows[idx][0])[0] for idx in range(len(test_flows))]
                 )
                 diam_test[diam_test < 5] = 5.0
             scale_range = 0.5
@@ -128,12 +129,11 @@ class CellPoseModel:
 
         print("Start Training Model")
         for epoch in range(n_epochs):
-            self.cellpose.train()
             indices = np.random.permutation(n_imgs)
             for batch in tqdm(range(0, n_imgs, batch_size)):
                 inds = indices[batch : batch + batch_size]
                 rsc = (
-                    diam_train[inds] / diam_mean
+                    diam_train[inds] / self.diam_mean
                     if rescale
                     else np.ones(len(inds), np.float32)
                 )
@@ -146,6 +146,7 @@ class CellPoseModel:
                 )
                 img = to_Tensor(img, device).float()
                 self.optimizer.zero_grad()
+                self.cellpose.train()
                 out = self.cellpose(img)[0]
 
                 loss = self.loss_fn(label, out)
