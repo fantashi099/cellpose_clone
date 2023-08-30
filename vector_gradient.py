@@ -5,7 +5,7 @@ from scipy.ndimage import maximum_filter1d, find_objects, binary_fill_holes, mea
 import torch
 from tqdm import trange
 import os
-from transform import diameters, resize_image
+from transform import diameters, resize_image, normalize99
 import tifffile
 import cv2
 
@@ -854,3 +854,41 @@ def compute_masks(dP, cellprob, p=None, niter=200,
     mask = fill_holes_and_remove_small_masks(mask, min_size=min_size)
 
     return mask, p
+
+
+# modified to use sinebow color
+def dx_to_circ(dP,transparency=False,mask=None):
+    """ dP is 2 x Y x X => 'optic' flow representation 
+    
+    Parameters
+    -------------
+    
+    dP: 2xLyxLx array
+        Flow field components [dy,dx]
+        
+    transparency: bool, default False
+        magnitude of flow controls opacity, not lightness (clear background)
+        
+    mask: 2D array 
+        Multiplies each RGB component to suppress noise
+    
+    """
+    
+    dP = np.array(dP)
+    mag = np.clip(normalize99(np.sqrt(np.sum(dP**2,axis=0))), 0, 1.)
+    angles = np.arctan2(dP[1], dP[0])+np.pi
+    a = 2
+    r = ((np.cos(angles)+1)/a)
+    g = ((np.cos(angles+2*np.pi/3)+1)/a)
+    b =((np.cos(angles+4*np.pi/3)+1)/a)
+    
+    if transparency:
+        im = np.stack((r,g,b,mag),axis=-1)
+    else:
+        im = np.stack((r*mag,g*mag,b*mag),axis=-1)
+        
+    if mask is not None and transparency and dP.shape[0]<3:
+        im[:,:,-1] *= mask
+        
+    im = (np.clip(im, 0, 1) * 255).astype(np.uint8)
+    return im
