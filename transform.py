@@ -286,9 +286,9 @@ def reshape_and_normalize_data(
 
     """
     # run_test = False
-    for test, data in enumerate([train_data, test_data]):
+    for data in [train_data, test_data]:
         if data is None:
-            return train_data, test_data
+            continue
         nimg = len(data)
         for i in range(nimg):
             if channels is not None:
