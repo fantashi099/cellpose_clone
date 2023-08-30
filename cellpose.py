@@ -8,7 +8,7 @@ from torch.optim import Adam
 from tqdm import tqdm
 from transform import (convert_image, diameters, normalize_img, pad_image_ND,
                        random_rotate_and_resize, reshape_and_normalize_data,
-                       resize_image)
+                       resize_image, make_tiles, average_tiles)
 from vector_gradient import (compute_masks, dx_to_circ, labels_to_flows,
                              to_Tensor)
 import time
@@ -48,6 +48,18 @@ class CellPoseModel:
         loss2 = self.criterion2(y[:, 2], lbl)
         loss = loss + loss2
         return loss
+    
+    def net_infer(self, img):
+        # Model Inference
+        img = np.expand_dims(img, axis=0)
+        img = to_Tensor(img, self.device)
+        self.cellpose.eval()
+        with torch.no_grad():
+            yf, style = self.cellpose(img)
+            yf = yf.detach().cpu().numpy()
+            style = style.detach().cpu().numpy()
+        yf, style = yf[0], style[0]
+        return yf, style
 
     def train(
         self,
@@ -249,19 +261,33 @@ class CellPoseModel:
             slc[-1] = slice(xsub[0], xsub[-1] + 1)
             slc = tuple(slc)
 
-            # Model Inference
-            img = np.expand_dims(img, axis=0)
-            img = to_Tensor(img, self.device)
-            self.cellpose.eval()
-            with torch.no_grad():
-                model_time = time.time()
-                yf, style = self.cellpose(img)
-                yf = yf.detach().cpu().numpy()
-                style = style.detach().cpu().numpy()
-            yf, style = yf[0], style[0]
-            model_end_time = time.time()
-            print(f"Model Inference Time: {model_end_time - model_time}, FPS: {1/(model_end_time - model_time)}")
+            # =========================================
 
+            IMG, ysub, xsub, Ly, Lx = make_tiles(img, bsize=224, 
+                                                            augment=False, tile_overlap=0.1)
+            ny, nx, nchan, ly, lx = IMG.shape
+            IMG = np.reshape(IMG, (ny*nx, nchan, ly, lx))
+            batch_size = 1
+            niter = int(np.ceil(IMG.shape[0] / batch_size))
+            nout = 3 + 32*False
+            y = np.zeros((IMG.shape[0], nout, ly, lx))
+            for k in range(niter):
+                irange = slice(batch_size*k, min(IMG.shape[0], batch_size*k+batch_size))
+                yf, tiled_style = self.net_infer(IMG[irange][0])
+                y[irange] = yf.reshape(irange.stop-irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1])
+                if k == 0:
+                    style = tiled_style[0]
+                style += tiled_style.sum(axis=0)
+            style /= IMG.shape[0]
+            if False:
+                y = np.reshape(y, (ny, nx, nout, bsize, bsize))
+                y = transforms.unaugment_tiles(y, self.unet)
+                y = np.reshape(y, (-1, nout, bsize, bsize))
+            
+            yf = average_tiles(y, ysub, xsub, Ly, Lx)
+            yf = yf[:,:img.shape[1],:img.shape[2]]
+
+            # =====================================================================
             style /= (style**2).sum() ** 0.5
 
             yf = yf[slc]

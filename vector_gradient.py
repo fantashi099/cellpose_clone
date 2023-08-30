@@ -295,20 +295,7 @@ def masks_to_flows(masks, use_gpu=False, device=None):
     else:
         masks_to_flows_device = masks_to_flows_cpu
         
-    if masks.ndim==3:
-        Lz, Ly, Lx = masks.shape
-        mu = np.zeros((3, Lz, Ly, Lx), np.float32)
-        for z in range(Lz):
-            mu0 = masks_to_flows_device(masks[z], device=device)[0]
-            mu[[1,2], z] += mu0
-        for y in range(Ly):
-            mu0 = masks_to_flows_device(masks[:,y], device=device)[0]
-            mu[[0,2], :, y] += mu0
-        for x in range(Lx):
-            mu0 = masks_to_flows_device(masks[:,:,x], device=device)[0]
-            mu[[0,1], :, :, x] += mu0
-        return mu
-    elif masks.ndim==2:
+    if masks.ndim==2:
         mu, mu_c = masks_to_flows_device(masks, device=device)
         return mu
 
