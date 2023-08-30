@@ -65,7 +65,7 @@ class CellPoseModel:
         loss = loss + loss2
         return loss
 
-    def net_infer(self, img):
+    def _net_infer(self, img):
         # Model Inference
         img = np.expand_dims(img, axis=0)
         img = to_Tensor(img, self.device)
@@ -150,7 +150,7 @@ class CellPoseModel:
         loss_avg, nsum = 0, 0
 
         if save_every > n_epochs:
-            save_every = n_epochs - 1
+            save_every = n_epochs
 
         if save_path is not None:
             fdir = os.path.join(save_path, "models/")
@@ -159,7 +159,7 @@ class CellPoseModel:
                 os.makedirs(fdir)
 
         print("Start Training Model")
-        for epoch in range(n_epochs):
+        for epoch in range(n_epochs+1):
             indices = np.random.permutation(n_imgs)
             for batch in tqdm(range(0, n_imgs, batch_size)):
                 img, label = self._get_batch_imgs(
@@ -290,7 +290,7 @@ class CellPoseModel:
                 irange = slice(
                     batch_size * k, min(IMG.shape[0], batch_size * k + batch_size)
                 )
-                yf, tiled_style = self.net_infer(IMG[irange][0])
+                yf, tiled_style = self._net_infer(IMG[irange][0])
                 y[irange] = yf.reshape(
                     irange.stop - irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1]
                 )
