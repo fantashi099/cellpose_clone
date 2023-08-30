@@ -291,7 +291,7 @@ class CellPoseModel:
 
             if tile:
                 IMG, ysub, xsub, Ly, Lx = make_tiles(
-                    img, bsize=224, augment=False, tile_overlap=0.1
+                    img, bsize=224, tile_overlap=0.1
                 )
                 ny, nx, nchan, ly, lx = IMG.shape
                 IMG = np.reshape(IMG, (ny * nx, nchan, ly, lx))
@@ -310,10 +310,6 @@ class CellPoseModel:
                         style = tiled_style[0]
                     style += tiled_style.sum(axis=0)
                 style /= IMG.shape[0]
-                if False:
-                    y = np.reshape(y, (ny, nx, nout, bsize, bsize))
-                    y = unaugment_tiles(y, self.unet)
-                    y = np.reshape(y, (-1, nout, bsize, bsize))
 
                 yf = average_tiles(y, ysub, xsub, Ly, Lx)
                 yf = yf[:, : img.shape[1], : img.shape[2]]
@@ -408,6 +404,7 @@ class CellPoseModel:
             interp=interp,
             use_gpu=use_gpu,
             tile=tile,
+            batch_infer=batch_infer,
         )
         flows = [dx_to_circ(dP), dP, cellprob, p]
         end_time = time.time()

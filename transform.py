@@ -461,7 +461,7 @@ def pad_image_ND(img0, div=16, extra = 1):
     return I, ysub, xsub
 
 
-def make_tiles(imgi, bsize=224, augment=False, tile_overlap=0.1):
+def make_tiles(imgi, bsize=224, tile_overlap=0.1):
     """ make tiles of image to run at test-time
 
     if augmented, tiles are flipped and tile_overlap=2.
@@ -477,9 +477,6 @@ def make_tiles(imgi, bsize=224, augment=False, tile_overlap=0.1):
 
     bsize : float (optional, default 224)
         size of tiles
-
-    augment : bool (optional, default False)
-        flip tiles and set tile_overlap=2.
 
     tile_overlap: float (optional, default 0.1)
         fraction of overlap of tiles
@@ -499,57 +496,24 @@ def make_tiles(imgi, bsize=224, augment=False, tile_overlap=0.1):
     """
 
     nchan, Ly, Lx = imgi.shape
-    if augment:
-        bsize = np.int32(bsize)
-        # pad if image smaller than bsize
-        if Ly<bsize:
-            imgi = np.concatenate((imgi, np.zeros((nchan, bsize-Ly, Lx))), axis=1)
-            Ly = bsize
-        if Lx<bsize:
-            imgi = np.concatenate((imgi, np.zeros((nchan, Ly, bsize-Lx))), axis=2)
-        Ly, Lx = imgi.shape[-2:]
-        # tiles overlap by half of tile size
-        ny = max(2, int(np.ceil(2. * Ly / bsize)))
-        nx = max(2, int(np.ceil(2. * Lx / bsize)))
-        ystart = np.linspace(0, Ly-bsize, ny).astype(int)
-        xstart = np.linspace(0, Lx-bsize, nx).astype(int)
+    tile_overlap = min(0.5, max(0.05, tile_overlap))
+    bsizeY, bsizeX = min(bsize, Ly), min(bsize, Lx)
+    bsizeY = np.int32(bsizeY)
+    bsizeX = np.int32(bsizeX)
+    # tiles overlap by 10% tile size
+    ny = 1 if Ly<=bsize else int(np.ceil((1.+2*tile_overlap) * Ly / bsize))
+    nx = 1 if Lx<=bsize else int(np.ceil((1.+2*tile_overlap) * Lx / bsize))
+    ystart = np.linspace(0, Ly-bsizeY, ny).astype(int)
+    xstart = np.linspace(0, Lx-bsizeX, nx).astype(int)
 
-        ysub = []
-        xsub = []
-
-        # flip tiles so that overlapping segments are processed in rotation
-        IMG = np.zeros((len(ystart), len(xstart), nchan,  bsize, bsize), np.float32)
-        for j in range(len(ystart)):
-            for i in range(len(xstart)):
-                ysub.append([ystart[j], ystart[j]+bsize])
-                xsub.append([xstart[i], xstart[i]+bsize])
-                IMG[j, i] = imgi[:, ysub[-1][0]:ysub[-1][1],  xsub[-1][0]:xsub[-1][1]]
-                # flip tiles to allow for augmentation of overlapping segments
-                if j%2==0 and i%2==1:
-                    IMG[j,i] = IMG[j,i, :,::-1, :]
-                elif j%2==1 and i%2==0:
-                    IMG[j,i] = IMG[j,i, :,:, ::-1]
-                elif j%2==1 and i%2==1:
-                    IMG[j,i] = IMG[j,i,:, ::-1, ::-1]
-    else:
-        tile_overlap = min(0.5, max(0.05, tile_overlap))
-        bsizeY, bsizeX = min(bsize, Ly), min(bsize, Lx)
-        bsizeY = np.int32(bsizeY)
-        bsizeX = np.int32(bsizeX)
-        # tiles overlap by 10% tile size
-        ny = 1 if Ly<=bsize else int(np.ceil((1.+2*tile_overlap) * Ly / bsize))
-        nx = 1 if Lx<=bsize else int(np.ceil((1.+2*tile_overlap) * Lx / bsize))
-        ystart = np.linspace(0, Ly-bsizeY, ny).astype(int)
-        xstart = np.linspace(0, Lx-bsizeX, nx).astype(int)
-
-        ysub = []
-        xsub = []
-        IMG = np.zeros((len(ystart), len(xstart), nchan,  bsizeY, bsizeX), np.float32)
-        for j in range(len(ystart)):
-            for i in range(len(xstart)):
-                ysub.append([ystart[j], ystart[j]+bsizeY])
-                xsub.append([xstart[i], xstart[i]+bsizeX])
-                IMG[j, i] = imgi[:, ysub[-1][0]:ysub[-1][1],  xsub[-1][0]:xsub[-1][1]]
+    ysub = []
+    xsub = []
+    IMG = np.zeros((len(ystart), len(xstart), nchan,  bsizeY, bsizeX), np.float32)
+    for j in range(len(ystart)):
+        for i in range(len(xstart)):
+            ysub.append([ystart[j], ystart[j]+bsizeY])
+            xsub.append([xstart[i], xstart[i]+bsizeX])
+            IMG[j, i] = imgi[:, ysub[-1][0]:ysub[-1][1],  xsub[-1][0]:xsub[-1][1]]
         
     return IMG, ysub, xsub, Ly, Lx
 
