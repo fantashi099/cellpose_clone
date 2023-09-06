@@ -102,7 +102,7 @@ class CellPoseModel:
         if len(X_train) != len(y_train):
             raise ValueError("train data and labels are not same length!")
 
-        if X_test and y_test:
+        if X_test is not None and y_test is not None:
             if (len(X_test) != len(y_test)):
                 raise ValueError("test data and labels are not same length!")
         
@@ -116,7 +116,7 @@ class CellPoseModel:
 
         print("Create Vector Gradient from Label Masks")
         train_flows = labels_to_flows(y_train, use_gpu=use_gpu, device=self.device)
-        if y_test:
+        if y_test is not None:
             test_flows = labels_to_flows(y_test, use_gpu=use_gpu, device=self.device)
 
         nmasks = np.array([label[0].max() for label in train_flows])
