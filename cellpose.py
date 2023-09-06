@@ -34,6 +34,10 @@ class CellPoseModel:
 
             self.diam_mean = self.cellpose.diam_mean.data.cpu().numpy()[0]
             self.diam_labels = self.cellpose.diam_labels.data.cpu().numpy()[0]
+            
+            sample = torch.rand(2, 64, 64).unsqueeze(0).to(self.device)
+            _ = self.cellpose(sample)
+            del _
         else:
             print("Not provide valid pre-trained path, load model from scracth")
 

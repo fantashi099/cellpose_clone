@@ -611,6 +611,8 @@ def remove_bad_flow_masks(masks, flows, threshold=0.4, use_gpu=False, device=Non
                 total_mem, used_mem = torch.cuda.mem_get_info()
                 return total_mem, used_mem
         
+        if masks.size * 20 > mem_info()[0]:
+            print("WARNING: image is very large, not using gpu to compute flows from masks for QC step flow_threshold")
         use_gpu = False
 
     merrors, _ = flow_error(masks, flows, use_gpu, device)
