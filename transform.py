@@ -413,6 +413,9 @@ def resize_image(img0, Ly=None, Lx=None, rsz=None, interpolation=cv2.INTER_LINEA
         for i,img in enumerate(img0):
             imgs[i] = cv2.resize(img, (Lx, Ly), interpolation=interpolation)
     else:
+        img_height, img_width = img0.shape[:2]
+        if Lx == img_width and Ly == img_height:
+            return img0
         imgs = cv2.resize(img0, (Lx, Ly), interpolation=interpolation)
     return imgs
 
