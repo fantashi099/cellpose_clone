@@ -1,0 +1,9 @@
+fastremap==1.14.0
+matplotlib==3.7.3
+numba==0.57.1
+numpy==1.24.4
+opencv-python-headless==4.8.0.76
+tifffile==2023.8.30
+torch==1.13.1+cu117
+torchvision==0.14.1+cu117
+tqdm==4.66.1
