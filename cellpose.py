@@ -4,9 +4,10 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
-from model import CellPose
 from torch.optim import Adam
 from tqdm import tqdm
+
+from model import CellPose
 from transform import (average_tiles, convert_image, diameters, make_tiles,
                        normalize_img, pad_image_ND, random_rotate_and_resize,
                        reshape_and_normalize_data, resize_image)
@@ -235,9 +236,9 @@ class CellPoseModel:
                 if epoch % save_every == 0 and epoch > 0:
                     if model_name is None:
                         model_name = "default"
-                    file_name = "model_{}_epoch_{}".format(model_name, epoch)
+                    file_name = "model_{}_epoch_{}.pt".format(model_name, epoch)
                     fpath = os.path.join(fdir, file_name)
-                    print(f"Save model in epoch: {epoch}")
+                    print(f"Save model in epoch: {epoch} - Saved path: {fpath}")
                     self.cellpose.save_model(fpath)
 
     def postprocess(
@@ -416,3 +417,9 @@ class CellPoseModel:
             f"Total Process Inference Time: {end_time - start_time}, FPS: {1/(end_time - start_time)}"
         )
         return masks, flows, styles
+
+    def save_model(self, fpath: str):
+        if not fpath.endswith(".pt"):
+            fpath += ".pt"
+        print(f"Saved path: {fpath}")
+        self.cellpose.save_model(fpath)
