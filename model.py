@@ -131,7 +131,7 @@ class ResUp(nn.Module):
             OrderedDict(
                 [
                     ("conv_0", ConvBlock(in_channels, out_channels, kernel_size)),
-                    ("conv_1", ConvBlock(out_channels * 2, out_channels, kernel_size)),
+                    ("conv_1", ConvBlock(out_channels, out_channels, kernel_size)),
                     ("conv_2", ConvBlock(out_channels, out_channels, kernel_size)),
                     ("conv_3", ConvBlock(out_channels, out_channels, kernel_size)),
                 ]
@@ -140,7 +140,7 @@ class ResUp(nn.Module):
         self.fc = nn.Sequential(
             OrderedDict(
                 [
-                    ("fc_0", nn.Linear(style_channels, out_channels * 2)),
+                    ("fc_0", nn.Linear(style_channels, out_channels)),
                     ("fc_1", nn.Linear(style_channels, out_channels)),
                     ("fc_2", nn.Linear(style_channels, out_channels)),
                 ]
@@ -149,7 +149,7 @@ class ResUp(nn.Module):
 
     def forward(self, x, y_resdown, style):
         skip_connect = self.skip_conv(x)
-        x = torch.cat((self.net[0](x), y_resdown), dim=1) + self.fc[0](style).unsqueeze(
+        x = self.net[0](x) + y_resdown + self.fc[0](style).unsqueeze(
             -1
         ).unsqueeze(-1)
         x = self.net[1](x) + skip_connect
