@@ -97,9 +97,9 @@ class DownSample(nn.Module):
     def forward(self, x):
         down_res = []
         for idx in range(len(self.net)):
-            x = self.net[idx](x)
             if idx > 0:
                 x = self.maxpool(x)
+            x = self.net[idx](x)
             down_res.append(x)
         return down_res
 
