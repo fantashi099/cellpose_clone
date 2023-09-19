@@ -183,7 +183,7 @@ class UpSample(nn.Module):
 
 class CellPose(nn.Module):
     def __init__(
-        self, c_hiddens: list = [2, 32, 64, 128, 256], diam_mean: float = 30.0, multiple_gpu: bool = False,
+        self, c_hiddens: list = [2, 32, 64, 128, 256], diam_mean: float = 30.0
     ) -> None:
         super(CellPose, self).__init__()
 
@@ -192,24 +192,16 @@ class CellPose(nn.Module):
         c_up = [c_hiddens[-1]] + c_hiddens[::-1][:-1]
         self.c_down = c_down
         self.c_up = c_up
-        
+        self.down_model = DownSample(c_hiddens=c_down)
+        self.up_model = UpSample(c_hiddens=c_up)
+        self.style = MakeStyle()
+        self.head = HeadBlock(c_up[-1], nclasses, 1)
         self.diam_mean = nn.Parameter(
             data=torch.ones(1) * diam_mean, requires_grad=False
         )
         self.diam_labels = nn.Parameter(
             data=torch.ones(1) * diam_mean, requires_grad=False
         )
-
-        if multiple_gpu:
-            self.down_model = nn.DataParallel(module=DownSample(c_hiddens=self.c_down))
-            self.up_model = nn.DataParallel(module=UpSample(c_hiddens=self.c_up))
-            self.style = nn.DataParallel(module=MakeStyle())
-            self.head = nn.DataParallel(module=HeadBlock(in_channels=self.c_up[-1], out_channels=self.nclasses, kernel_size=1))
-        else:
-            self.down_model = DownSample(c_hiddens=self.c_down)
-            self.up_model = UpSample(c_hiddens=self.c_up)
-            self.style = MakeStyle()
-            self.head = HeadBlock(in_channels=self.c_up[-1], out_channels=self.nclasses, kernel_size=1)
 
     def forward(self, x):
         out_resdown = self.down_model(x)

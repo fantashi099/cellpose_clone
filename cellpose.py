@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 import torch
@@ -17,36 +18,32 @@ from vector_gradient import (compute_masks, dx_to_circ, labels_to_flows,
 class CellPoseModel:
     def __init__(
         self,
+        c_hiddens: list = [2, 32, 64, 128, 256],
+        diam_mean: float = 30,
         pretrained_model: str = "",
         device: str = "cpu",
-        diam_mean: float = 30,
     ) -> None:
-        self.cellpose = CellPose(diam_mean=diam_mean).to(device)
+        self.cellpose = CellPose(c_hiddens=c_hiddens, diam_mean=diam_mean).to(device)
 
         self.diam_mean = diam_mean
         self.diam_labels = diam_mean
         self.device = device
-        self.pretrained_model = pretrained_model
 
-        if os.path.exists(self.pretrained_model):
-            print(f"Load pre-trained model at: {self.pretrained_model}")
-            self._load_pretrained()
-            self._warmup_model()
+        if os.path.exists(pretrained_model):
+            print(f"Load pre-trained model at: {pretrained_model}")
+            self.cellpose.load_model(pretrained_model, device=self.device)
+
+            self.diam_mean = self.cellpose.diam_mean.data.cpu().numpy()[0]
+            self.diam_labels = self.cellpose.diam_labels.data.cpu().numpy()[0]
+            
+            sample = torch.rand(2, 64, 64).unsqueeze(0).to(self.device)
+            _ = self.cellpose(sample)
+            del _
         else:
             print("Not provide valid pre-trained path, load model from scracth")
 
     def set_device(self, device: str = "cpu"):
         self.cellpose.to(device)
-
-    def _load_pretrained(self):
-        self.cellpose.load_model(self.pretrained_model, device=self.device)
-        self.diam_mean = self.cellpose.diam_mean.data.cpu().numpy()[0]
-        self.diam_labels = self.cellpose.diam_labels.data.cpu().numpy()[0]
-
-    def _warmup_model(self):
-        sample = torch.rand(2, 64, 64).unsqueeze(0).to(self.device)
-        _ = self.cellpose(sample)
-        del _
 
     def _get_batch_imgs(
         self, data, label, batch, batch_size, indices, diam, rescale, scale_range
@@ -102,7 +99,6 @@ class CellPoseModel:
         eval_batch_size: int = 1,
         rescale: bool = True,
         model_name: str = None,
-        multiple_gpu: str = False,
     ) -> None:
         if len(X_train) != len(y_train):
             raise ValueError("train data and labels are not same length!")
@@ -114,11 +110,6 @@ class CellPoseModel:
         if channels is None:
             print("Channels is None => Set channels = [0,0]")
             channels = [0,0]
-
-        if multiple_gpu:
-            self.cellpose = CellPose(diam_mean=self.diam_mean, multi_gpu=multiple_gpu).to(self.device)
-            if os.path.exists(self.pretrained_model):
-                self._load_pretrained()
 
         X_train, X_test = reshape_and_normalize_data(
             X_train, test_data=X_test, channels=channels
@@ -249,13 +240,6 @@ class CellPoseModel:
                     fpath = os.path.join(fdir, file_name)
                     print(f"Save model in epoch: {epoch} - Saved path: {fpath}")
                     self.cellpose.save_model(fpath)
-                    self.pretrained_model = fpath
-
-                    # Reload model back to single GPU if using multi GPU
-                    if multiple_gpu:
-                        self.cellpose = CellPose(diam_mean=self.diam_mean).to(self.device)
-                        self._load_pretrained()
-                        self._warmup_model()
 
     def postprocess(
         self,
@@ -413,6 +397,7 @@ class CellPoseModel:
         else:
             rescale = self.diam_mean / self.diam_labels
 
+        start_time = time.time()
         masks, styles, dP, cellprob, p = self.postprocess(
             data,
             normalize=True,
@@ -427,6 +412,10 @@ class CellPoseModel:
             batch_infer=batch_infer,
         )
         flows = [dx_to_circ(dP), dP, cellprob, p]
+        end_time = time.time()
+        print(
+            f"Total Process Inference Time: {end_time - start_time}, FPS: {1/(end_time - start_time)}"
+        )
         return masks, flows, styles
 
     def save_model(self, fpath: str):
