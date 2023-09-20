@@ -1,3 +1,4 @@
+import copy
 import os
 import time
 
@@ -18,12 +19,11 @@ from vector_gradient import (compute_masks, dx_to_circ, labels_to_flows,
 class CellPoseModel:
     def __init__(
         self,
-        c_hiddens: list = [2, 32, 64, 128, 256],
-        diam_mean: float = 30,
         pretrained_model: str = "",
         device: str = "cpu",
+        diam_mean: float = 30,
     ) -> None:
-        self.cellpose = CellPose(c_hiddens=c_hiddens, diam_mean=diam_mean).to(device)
+        self.cellpose = CellPose(diam_mean=diam_mean).to(device)
 
         self.diam_mean = diam_mean
         self.diam_labels = diam_mean
@@ -35,7 +35,7 @@ class CellPoseModel:
 
             self.diam_mean = self.cellpose.diam_mean.data.cpu().numpy()[0]
             self.diam_labels = self.cellpose.diam_labels.data.cpu().numpy()[0]
-            
+
             sample = torch.rand(2, 64, 64).unsqueeze(0).to(self.device)
             _ = self.cellpose(sample)
             del _
@@ -91,7 +91,7 @@ class CellPoseModel:
         save_path: str = None,
         min_train_masks: int = 5,
         save_every: int = 50,
-        eval_step: int = 50,
+        eval_step: int = 25,
         learning_rate: float = 3e-4,
         n_epochs: int = 200,
         weight_decay: float = 1e-6,
@@ -104,12 +104,12 @@ class CellPoseModel:
             raise ValueError("train data and labels are not same length!")
 
         if X_test is not None and y_test is not None:
-            if (len(X_test) != len(y_test)):
+            if len(X_test) != len(y_test):
                 raise ValueError("test data and labels are not same length!")
-        
+
         if channels is None:
             print("Channels is None => Set channels = [0,0]")
-            channels = [0,0]
+            channels = [0, 0]
 
         X_train, X_test = reshape_and_normalize_data(
             X_train, test_data=X_test, channels=channels
@@ -171,8 +171,10 @@ class CellPoseModel:
             if not os.path.exists(fdir):
                 os.makedirs(fdir)
 
+        best_loss = np.inf
+        best_model_state = None
         print("Start Training Model")
-        for epoch in range(n_epochs+1):
+        for epoch in range(n_epochs + 1):
             indices = np.random.permutation(n_imgs)
             for batch in tqdm(range(0, n_imgs, batch_size)):
                 img, label = self._get_batch_imgs(
@@ -202,6 +204,10 @@ class CellPoseModel:
 
             loss_avg /= nsum
             print("Epoch %d, Loss %2.4f, LR %2.5f" % (epoch, loss_avg, learning_rate))
+            if best_loss > loss_avg_test:
+                best_loss = loss_avg_test
+                best_model_state = copy.deepcopy(self.cellpose.state_dict())
+
             if epoch % eval_step == 0:
                 if X_test is not None and y_test is not None:
                     loss_avg_test, nsum = 0, 0
@@ -240,6 +246,13 @@ class CellPoseModel:
                     fpath = os.path.join(fdir, file_name)
                     print(f"Save model in epoch: {epoch} - Saved path: {fpath}")
                     self.cellpose.save_model(fpath)
+
+                    if best_model_state is not None:
+                        best_fname = "model_{}_best.pt".format(model_name)
+                        best_fpath = os.path.join(fdir, best_fname)
+                        torch.save(best_model_state, best_fpath)
+
+        torch.cuda.empty_cache()
 
     def postprocess(
         self,
@@ -295,9 +308,7 @@ class CellPoseModel:
             # =========================================
 
             if tile:
-                IMG, ysub, xsub, Ly, Lx = make_tiles(
-                    img, bsize=224, tile_overlap=0.1
-                )
+                IMG, ysub, xsub, Ly, Lx = make_tiles(img, bsize=224, tile_overlap=0.1)
                 ny, nx, nchan, ly, lx = IMG.shape
                 IMG = np.reshape(IMG, (ny * nx, nchan, ly, lx))
                 niter = int(np.ceil(IMG.shape[0] / batch_infer))
@@ -305,11 +316,15 @@ class CellPoseModel:
                 y = np.zeros((IMG.shape[0], nout, ly, lx))
                 for k in range(niter):
                     irange = slice(
-                        batch_infer * k, min(IMG.shape[0], batch_infer * k + batch_infer)
+                        batch_infer * k,
+                        min(IMG.shape[0], batch_infer * k + batch_infer),
                     )
                     yf, tiled_style = self._net_infer(IMG[irange])
                     y[irange] = yf.reshape(
-                        irange.stop - irange.start, yf.shape[-3], yf.shape[-2], yf.shape[-1]
+                        irange.stop - irange.start,
+                        yf.shape[-3],
+                        yf.shape[-2],
+                        yf.shape[-1],
                     )
                     if k == 0:
                         style = tiled_style[0]
@@ -384,7 +399,7 @@ class CellPoseModel:
     ):
         if channels is None:
             print("Channels is None => Set channels = [0,0]")
-            channels = [0,0]
+            channels = [0, 0]
 
         # reshape image (normalization happens in postprocess)
         data = convert_image(data, channels=channels, normalize=False)
