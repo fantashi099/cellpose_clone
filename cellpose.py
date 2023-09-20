@@ -289,6 +289,10 @@ class CellPoseModel:
                 img = normalize_img(img, invert=invert)
             if rescale != 1.0:
                 img = resize_image(img, rsz=rescale)
+            # Upscale image smaller than (224,224)
+            if shape[1] < 224 or shape[2] < 224:
+                scale = max(224/shape[1], 224/shape[2])
+                img = resize_image(img, int(shape[1] * scale), int(shape[2] * scale))
 
             # Model Inference
             # make image nchan x Ly x Lx for net
