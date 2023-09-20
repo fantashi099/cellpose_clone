@@ -204,13 +204,9 @@ class CellPoseModel:
 
             loss_avg /= nsum
             print("Epoch %d, Loss %2.4f, LR %2.5f" % (epoch, loss_avg, learning_rate))
-            if best_loss > loss_avg_test:
-                best_loss = loss_avg_test
-                best_model_state = copy.deepcopy(self.cellpose.state_dict())
-
             if epoch % eval_step == 0:
                 if X_test is not None and y_test is not None:
-                    loss_avg_test, nsum = 0, 0
+                    loss_avg_test, nsum_test = 0, 0
                     eval_imgs = len(X_test)
                     indices = np.random.permutation(eval_imgs)
                     for batch in range(0, eval_imgs, eval_batch_size):
@@ -228,15 +224,18 @@ class CellPoseModel:
                         self.cellpose.eval()
                         with torch.no_grad():
                             out = self.cellpose(img)[0]
-                            loss = self.loss_fn(label, out)
-                            test_loss = loss.item()
+                            test_loss = self.loss_fn(label, out)
+                            test_loss = test_loss.item()
                             test_loss *= len(img)
 
                             loss_avg_test += test_loss
-                            nsum += len(img)
+                            nsum_test += len(img)
 
-                    loss_avg_test /= nsum
+                    loss_avg_test /= nsum_test
                     print("Eval Loss %2.4f" % (loss_avg_test))
+                    if best_loss > loss_avg_test:
+                        best_loss = loss_avg_test
+                        best_model_state = copy.deepcopy(self.cellpose.state_dict())
 
             if save_path is not None:
                 if epoch % save_every == 0 and epoch > 0:
