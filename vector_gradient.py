@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit
 import fastremap
-from scipy.ndimage import maximum_filter1d, find_objects, binary_fill_holes, mean
+from scipy.ndimage import maximum_filter, find_objects, binary_fill_holes, mean
 import torch
 from tqdm import trange
 import os
@@ -620,7 +620,7 @@ def remove_bad_flow_masks(masks, flows, threshold=0.4, use_gpu=False, device=Non
     masks[np.isin(masks, badi)] = 0
     return masks
 
-def get_masks(p, iscell=None, rpad=20):
+def get_masks(p, rpad=20):
     """ create masks using pixel convergence after running dynamics
     
     Makes a histogram of final pixel locations p, initializes masks 
@@ -632,22 +632,11 @@ def get_masks(p, iscell=None, rpad=20):
     p: float32, 3D or 4D array
         final locations of each pixel after dynamics,
         size [axis x Ly x Lx] or [axis x Lz x Ly x Lx].
-    iscell: bool, 2D or 3D array
-        if iscell is not None, set pixels that are 
-        iscell False to stay in their original location.
     rpad: int (optional, default 20)
         histogram edge padding
-    threshold: float (optional, default 0.4)
-        masks with flow error greater than threshold are discarded 
-        (if flows is not None)
-    flows: float, 3D or 4D array (optional, default None)
-        flows [axis x Ly x Lx] or [axis x Lz x Ly x Lx]. If flows
-        is not None, then masks with inconsistent flows are removed using 
-        `remove_bad_flow_masks`.
     Returns
     ---------------
-    M0: int, 2D or 3D array
-        masks with inconsistent flow masks removed, 
+    M0: int, 2D or 3D array masks, 
         0=NO masks; 1,2,...=mask labels,
         size [Ly x Lx] or [Lz x Ly x Lx]
     
@@ -657,38 +646,23 @@ def get_masks(p, iscell=None, rpad=20):
     edges = []
     shape0 = p.shape[1:]
     dims = len(p)
-    if iscell is not None:
-        if dims==3:
-            inds = np.meshgrid(np.arange(shape0[0]), np.arange(shape0[1]),
-                np.arange(shape0[2]), indexing='ij')
-        elif dims==2:
-            inds = np.meshgrid(np.arange(shape0[0]), np.arange(shape0[1]),
-                     indexing='ij')
-        for i in range(dims):
-            p[i, ~iscell] = inds[i][~iscell]
 
     for i in range(dims):
         pflows.append(p[i].flatten().astype('int32'))
         edges.append(np.arange(-.5-rpad, shape0[i]+.5+rpad, 1))
 
     h,_ = np.histogramdd(tuple(pflows), bins=edges)
-    hmax = h.copy()
-    for i in range(dims):
-        hmax = maximum_filter1d(hmax, 5, axis=i)
+    hmax = maximum_filter(h, size=5)
 
-    seeds = np.nonzero(np.logical_and(h-hmax>-1e-6, h>10))
-    Nmax = h[seeds]
+    seeds = np.argwhere((h - hmax > -1e-6) & (h > 10))
+    Nmax = h[seeds[:, 0], seeds[:, 1]]
     isort = np.argsort(Nmax)[::-1]
-    for s in seeds:
-        s = s[isort]
+    seeds = seeds[isort]
 
-    pix = list(np.array(seeds).T)
+    pix = list(seeds)
 
     shape = h.shape
-    if dims==3:
-        expand = np.nonzero(np.ones((3,3,3)))
-    else:
-        expand = np.nonzero(np.ones((3,3)))
+    expand = np.nonzero(np.ones((3,) * dims))
     for e in expand:
         e = np.expand_dims(e,1)
 
@@ -696,21 +670,19 @@ def get_masks(p, iscell=None, rpad=20):
         for k in range(len(pix)):
             if iter==0:
                 pix[k] = list(pix[k])
-            newpix = []
+
+            newpix = [None] * dims
             iin = []
-            for i,e in enumerate(expand):
-                epix = e[:,np.newaxis] + np.expand_dims(pix[k][i], 0) - 1
+            for i, e in enumerate(expand):
+                epix = e[:, np.newaxis] + np.expand_dims(pix[k][i], 0) - 1
                 epix = epix.flatten()
-                iin.append(np.logical_and(epix>=0, epix<shape[i]))
-                newpix.append(epix)
+                iin.append(np.all((epix >= 0) & (epix < shape[i])))
+                newpix[i] = epix
             iin = np.all(tuple(iin), axis=0)
-            for p in newpix:
-                p = p[iin]
-            newpix = tuple(newpix)
-            igood = h[newpix]>2
+            igood = h[tuple(newpix)] > 2
             for i in range(dims):
                 pix[k][i] = newpix[i][igood]
-            if iter==4:
+            if iter == 4:
                 pix[k] = tuple(pix[k])
     
     M = np.zeros(h.shape, np.uint32)
@@ -788,7 +760,6 @@ def compute_masks(dP, cellprob, p=None, niter=200,
                    use_gpu=False,device=None):
     """ compute masks using dynamics from dP, cellprob, and boundary """
     cp_mask = cellprob > cellprob_threshold
-    # print(cellprob[cp_mask])
 
     if np.any(cp_mask): #mask at this point is a cell cluster binary map, not labels     
         # follow flows
@@ -802,13 +773,12 @@ def compute_masks(dP, cellprob, p=None, niter=200,
                 return mask, p
         
         #calculate masks
-        mask = get_masks(p, iscell=cp_mask)
+        mask = get_masks(p)
         # flow thresholding factored out of get_masks
         if not do_3D:
             if mask.max()>0 and flow_threshold is not None and flow_threshold > 0:
                 # make sure labels are unique at output of get_masks
                 mask = remove_bad_flow_masks(mask, dP, threshold=flow_threshold, use_gpu=use_gpu, device=device)
-        
             
         if resize is not None:
             #if verbose:
@@ -825,10 +795,6 @@ def compute_masks(dP, cellprob, p=None, niter=200,
             Ly,Lx = mask.shape
         elif mask.max() < 2**16:
             mask = mask.astype(np.uint16)
-
-        # import matplotlib.pyplot as plt
-        # plt.imshow(mask)
-        # plt.show()
 
     else: # nothing to compute, just make it compatible
         shape = resize if resize is not None else cellprob.shape

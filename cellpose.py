@@ -415,7 +415,6 @@ class CellPoseModel:
         else:
             rescale = self.diam_mean / self.diam_labels
 
-        start_time = time.time()
         masks, styles, dP, cellprob, p = self.postprocess(
             data,
             normalize=True,
@@ -430,10 +429,6 @@ class CellPoseModel:
             batch_infer=batch_infer,
         )
         flows = [dx_to_circ(dP), dP, cellprob, p]
-        end_time = time.time()
-        print(
-            f"Total Process Inference Time: {end_time - start_time}, FPS: {1/(end_time - start_time)}"
-        )
         return masks, flows, styles
 
     def save_model(self, fpath: str):
@@ -441,3 +436,30 @@ class CellPoseModel:
             fpath += ".pt"
         print(f"Saved path: {fpath}")
         self.cellpose.save_model(fpath)
+
+    def benchmark(self, input_shape=(1, 2, 224, 224), dtype='fp32', nwarmup=10, nruns=20):
+        input_data = torch.randn(input_shape)
+        input_data = input_data.to("cuda:0")
+        if dtype=='fp16':
+            input_data = input_data.half()
+            
+        print("Warm up ...")
+        with torch.no_grad():
+            for _ in range(nwarmup):
+                features = self.cellpose(input_data)
+        torch.cuda.synchronize()
+        print("Start timing ...")
+        timings = []
+        with torch.no_grad():
+            for i in range(1, nruns+1):
+                start_time = time.time()
+                features = self.cellpose(input_data)
+                torch.cuda.synchronize()
+                end_time = time.time()
+                timings.append(end_time - start_time)
+                if i%10==0:
+                    print('Iteration %d/%d, avg batch time %.2f ms'%(i, nruns, np.mean(timings)*1000))
+        
+        torch.cuda.empty_cache()
+        print("Input shape:", input_data.size())
+        print('Average throughput: %.2f images/second'%(input_shape[0]/np.mean(timings)))
